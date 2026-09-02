@@ -7,7 +7,7 @@ app = Flask(__name__)
 # Путь к фотографиям (volume). Если volume не подключён, можно заменить на "photos"
 PHOTOS_DIR = "/data/photos"
 
-# ---------- HTML для просмотра карты ----------
+# ---------- HTML для просмотра карты (Яндекс.Карты) ----------
 MAP_HTML = """
 <!DOCTYPE html>
 <html>
@@ -15,61 +15,74 @@ MAP_HTML = """
     <meta charset="utf-8">
     <title>Карта</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://api-maps.yandex.ru/2.1/?apikey={{ api_key }}&lang=ru_RU" type="text/javascript"></script>
     <style>
         body { margin:0; }
         #map { height: 100vh; width: 100%; }
-        .leaflet-popup-content img { max-width:200px; max-height:200px; }
+        .balloon-content img { max-width:200px; max-height:200px; border-radius:8px; margin-top:5px; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <script>
-        var map = L.map('map').setView([45.035470, 38.975313], 12);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-}).addTo(map);
+        ymaps.ready(function () {
+            var map = new ymaps.Map('map', {
+                center: [45.035470, 38.975313],
+                zoom: 12,
+                controls: ['zoomControl', 'searchControl', 'typeSelector', 'fullscreenControl']
+            });
 
-        fetch('/api/objects')
-            .then(response => response.json())
-            .then(data => {
-                data.objects.forEach(obj => {
-                    var color = (obj.category === 'bobik') ? 'orange' : 'red';
-                    if (obj.category === 'bobik' && obj.subcategory === 'patrol') color = 'darkorange';
-                    var markerHtml = '<div style="background:' + color + '; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>';
-                    var marker = L.marker([obj.lat, obj.lon], {
-                        icon: L.divIcon({ html: markerHtml, className: '', iconSize: [18,18], iconAnchor: [9,9] })
-                    }).addTo(map);
-                    var popup = '<b>#' + obj.id + '</b><br>';
-                    if (obj.category === 'bobik') {
-                        popup += 'Бобик (' + (obj.subcategory === 'patrol' ? 'Патрульный' : 'Гражданский') + ')<br>';
-                        if (obj.comment) popup += 'Комментарий: ' + obj.comment + '<br>';
-                    } else {
-                        popup += 'Красный берет<br>';
-                    }
-                    if (obj.orientation_id) {
-                        if (obj.orientation_type && obj.orientation_type === 'to') {
-                            popup += 'Направление: к "' + obj.orientation_id + '"<br>';
-                        } else if (obj.orientation_type && obj.orientation_type === 'from') {
-                            popup += 'Направление: от "' + obj.orientation_id + '"<br>';
-                        } else {
-                            popup += 'Ориентир: ' + obj.orientation_id + '<br>';
-                        }
-                    }
-                    popup += 'Время: ' + obj.timestamp;
-                    if (obj.photos && obj.photos.length > 0) {
-                        popup += '<br><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:5px;">';
-                        obj.photos.forEach(url => {
-                            popup += '<img src="' + url + '" style="width:80px;height:80px;object-fit:cover;border-radius:6px;">';
+            // Получаем данные объектов
+            fetch('/api/objects')
+                .then(response => response.json())
+                .then(data => {
+                    data.objects.forEach(obj => {
+                        var coords = [obj.lat, obj.lon];
+                        var color = (obj.category === 'bobik') ? '#FF8C00' : '#FF0000';
+                        if (obj.category === 'bobik' && obj.subcategory === 'patrol') color = '#FF4500';
+
+                        var placemark = new ymaps.Placemark(coords, {
+                            balloonContent: buildBalloonContent(obj)
+                        }, {
+                            preset: 'islands#circleIcon',
+                            iconColor: color,
+                            iconStrokeColor: '#ffffff',
+                            iconStrokeWidth: 2
                         });
-                        popup += '</div>';
-                    }
-                    marker.bindPopup(popup);
+
+                        map.geoObjects.add(placemark);
+                    });
+                })
+                .catch(err => console.error(err));
+        });
+
+        function buildBalloonContent(obj) {
+            var html = '<b>#' + obj.id + '</b><br>';
+            if (obj.category === 'bobik') {
+                html += 'Бобик (' + (obj.subcategory === 'patrol' ? 'Патрульный' : 'Гражданский') + ')<br>';
+                if (obj.comment) html += 'Комментарий: ' + obj.comment + '<br>';
+            } else {
+                html += 'Красный берет<br>';
+            }
+            if (obj.orientation_id) {
+                if (obj.orientation_type && obj.orientation_type === 'to') {
+                    html += 'Направление: к "' + obj.orientation_id + '"<br>';
+                } else if (obj.orientation_type && obj.orientation_type === 'from') {
+                    html += 'Направление: от "' + obj.orientation_id + '"<br>';
+                } else {
+                    html += 'Ориентир: ' + obj.orientation_id + '<br>';
+                }
+            }
+            html += 'Время: ' + obj.timestamp;
+            if (obj.photos && obj.photos.length > 0) {
+                html += '<div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:5px;">';
+                obj.photos.forEach(url => {
+                    html += '<img src="' + url + '" style="width:80px;height:80px;object-fit:cover;border-radius:6px;">';
                 });
-            })
-            .catch(err => console.error(err));
+                html += '</div>';
+            }
+            return html;
+        }
     </script>
 </body>
 </html>
@@ -77,7 +90,10 @@ MAP_HTML = """
 
 @app.route('/')
 def index():
-    return render_template_string(MAP_HTML)
+    api_key = os.environ.get('YANDEX_MAPS_API_KEY', '')
+    if not api_key:
+        return "Ошибка: не задан YANDEX_MAPS_API_KEY", 500
+    return render_template_string(MAP_HTML, api_key=api_key)
 
 @app.route('/photos/<path:filename>')
 def serve_photo(filename):
