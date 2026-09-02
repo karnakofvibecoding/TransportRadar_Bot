@@ -1,10 +1,11 @@
 import os
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_from_directory
 import db
 
 app = Flask(__name__)
 
-# Страница просмотра карты
+PHOTOS_DIR = "/data/photos"  # путь к фото (volume) или "photos" для локального
+
 MAP_HTML = """
 <!DOCTYPE html>
 <html>
@@ -50,6 +51,13 @@ MAP_HTML = """
                         popup += 'Направление: ' + (obj.orientation_type === 'to' ? 'к' : 'от') + ' "' + obj.orientation_id + '"<br>';
                     }
                     popup += 'Время: ' + obj.timestamp;
+                    if (obj.photos && obj.photos.length > 0) {
+                        popup += '<br><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:5px;">';
+                        obj.photos.forEach(url => {
+                            popup += '<img src="' + url + '" style="width:80px;height:80px;object-fit:cover;border-radius:6px;">';
+                        });
+                        popup += '</div>';
+                    }
                     marker.bindPopup(popup);
                 });
             })
@@ -59,7 +67,6 @@ MAP_HTML = """
 </html>
 """
 
-# Страница выбора точки
 SELECT_HTML = """
 <!DOCTYPE html>
 <html>
@@ -103,6 +110,10 @@ def index():
 def select():
     return render_template_string(SELECT_HTML)
 
+@app.route('/photos/<path:filename>')
+def serve_photo(filename):
+    return send_from_directory(PHOTOS_DIR, filename)
+
 @app.route('/api/objects')
 def api_objects():
     category = request.args.get('category')
@@ -111,7 +122,8 @@ def api_objects():
     objects = []
     for row in rows:
         obj_id, cat, subcat, comment, orient_id, orient_type, lat, lon, timestamp = row
-        photo_count = db.get_photo_count(obj_id)
+        photo_files = db.get_photos_for_object(obj_id)
+        photo_urls = [f"/photos/{os.path.basename(fp)}" for fp, _ in photo_files]
         objects.append({
             'id': obj_id,
             'category': cat,
@@ -122,7 +134,7 @@ def api_objects():
             'lat': lat,
             'lon': lon,
             'timestamp': timestamp,
-            'photo_count': photo_count
+            'photos': photo_urls
         })
     return jsonify({'objects': objects})
 
