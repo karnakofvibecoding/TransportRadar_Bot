@@ -4,8 +4,10 @@ import db
 
 app = Flask(__name__)
 
-PHOTOS_DIR = "/data/photos"  # путь к фото (volume) или "photos" для локального
+# Путь к фотографиям (volume). Если volume не подключён, можно заменить на "photos"
+PHOTOS_DIR = "/data/photos"
 
+# ---------- HTML для просмотра карты ----------
 MAP_HTML = """
 <!DOCTYPE html>
 <html>
@@ -67,6 +69,7 @@ MAP_HTML = """
 </html>
 """
 
+# ---------- HTML для выбора точки ----------
 SELECT_HTML = """
 <!DOCTYPE html>
 <html>
@@ -85,6 +88,7 @@ SELECT_HTML = """
 <body>
     <div id="map"></div>
     <script>
+        Telegram.WebApp.ready();
         var map = L.map('map').setView([45.035470, 38.975313], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
@@ -94,7 +98,8 @@ SELECT_HTML = """
         map.on('click', function(e) {
             var lat = e.latlng.lat;
             var lon = e.latlng.lng;
-            Telegram.WebApp.sendData(JSON.stringify({lat: lat, lon: lon}));
+            var data = JSON.stringify({lat: lat, lon: lon});
+            Telegram.WebApp.sendData(data);
             Telegram.WebApp.close();
         });
     </script>
