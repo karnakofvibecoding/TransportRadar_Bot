@@ -17,7 +17,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import db
 from webapp import app  # импортируем Flask-приложение
 
-TOKEN = os.environ.get("TOKEN", "ТВОЙ_ТОКЕН_ОТ_BOTFATHER")
+TOKEN = os.getenv("BOT_TOKEN")
+
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN не задан")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://your-app.up.railway.app")
 
 bot = Bot(token=TOKEN)
