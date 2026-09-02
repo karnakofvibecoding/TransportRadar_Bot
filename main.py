@@ -17,10 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import db
 from webapp import app  # импортируем Flask-приложение
 
-TOKEN = os.getenv("BOT_TOKEN")
-
-if not TOKEN:
-    raise RuntimeError("BOT_TOKEN не задан")
+TOKEN = os.environ.get("TOKEN", "ТВОЙ_ТОКЕН_ОТ_BOTFATHER")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://your-app.up.railway.app")
 
 bot = Bot(token=TOKEN)
@@ -108,10 +105,20 @@ async def broadcast_new_report(author_id: int, obj_id: int, data: dict):
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "Привет! Я бот-радар.\n"
-        "/map — посмотреть карту\n"
+        "👋 Привет! Я <b>VP-Radar23</b> — бот для отметки и мониторинга объектов на карте.\n\n"
+        "С моей помощью ты можешь:\n"
+        "– 📍 Добавлять объекты, выбрав точку прямо на карте или отправив свою геолокацию\n"
+        "– 🚙 Указывать категорию: <b>Бобик</b> (патрульный или гражданский) или <b>Красный берет</b>\n"
+        "– 🧭 Задавать направление движения относительно известных ориентиров\n"
+        "– 📷 Прикреплять фотографии к объектам\n"
+        "– 🗺 Просматривать все репорты на интерактивной карте\n"
+        "– 🔔 Получать уведомления о новых объектах от других пользователей\n\n"
+        "Основные команды:\n"
         "/add — добавить объект (выбор точки на карте)\n"
-        "Или просто отправь геолокацию."
+        "/map — открыть карту со всеми объектами\n"
+        "/start — показать это сообщение\n\n"
+        "Также ты можешь просто отправить свою геолокацию, и я начну диалог добавления объекта.",
+        parse_mode="HTML"
     )
 
 @dp.message(Command("map"))
@@ -162,6 +169,7 @@ async def ask_category(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("cat_"))
 async def choose_category(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     category = callback.data.split("_")[1]
     await state.update_data(category=category)
     await callback.message.edit_text(f"Категория: {get_category_label(category)}")
@@ -177,6 +185,7 @@ async def choose_category(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("subcat_"))
 async def choose_subcategory(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     subcat = callback.data.split("_")[1]  # patrol или civilian
     await state.update_data(subcategory=subcat)
     await callback.message.edit_text(f"Тип: {get_subcategory_label(subcat)}")
@@ -205,6 +214,7 @@ async def ask_orientation_type(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("orient_"))
 async def choose_orientation_type(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     action = callback.data.split("_", 1)[1]  # to, from, none
     if action == "none":
         await state.update_data(orientation_id=None, orientation_type=None)
@@ -220,6 +230,7 @@ async def choose_orientation_type(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("orient_name_"))
 async def choose_orientation(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     name = callback.data.split("_", 2)[2]  # после orient_name_
     await state.update_data(orientation_id=name)
     await save_object(callback.message, state)
@@ -258,6 +269,7 @@ async def save_object(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("photo_"))
 async def photo_request(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     if callback.data == "photo_skip":
         await callback.message.edit_text("Фото не добавлено.")
         await state.clear()
@@ -274,8 +286,9 @@ async def receive_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file_info = await bot.get_file(photo.file_id)
     downloaded = await bot.download_file(file_info.file_path)
-    os.makedirs("photos", exist_ok=True)
-    filename = f"photos/object_{obj_id}_{message.date.timestamp()}.jpg"
+    # Убедимся, что папка существует
+    os.makedirs("/data/photos", exist_ok=True)
+    filename = f"/data/photos/object_{obj_id}_{message.date.timestamp()}.jpg"
     with open(filename, "wb") as f:
         f.write(downloaded.read())
     db.add_photo(obj_id, filename)
