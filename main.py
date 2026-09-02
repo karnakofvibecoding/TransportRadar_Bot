@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import json
 import threading
 from datetime import datetime
 from typing import Optional
@@ -51,11 +50,13 @@ dp.update.middleware(RegisterUserMiddleware())
 
 # ---------- FSM ----------
 class Registration(StatesGroup):
+    waiting_for_location_method = State()  # выбор способа: геолокация или ориентир
+    waiting_for_location = State()         # ожидание геолокации (если выбран этот способ)
+    waiting_for_orientation_select = State() # выбор конкретного ориентира
     waiting_for_category = State()
     waiting_for_subcategory = State()
     waiting_for_comment = State()
-    waiting_for_orientation_type = State()
-    waiting_for_orientation = State()
+    waiting_for_confirmation = State()
     waiting_for_photo = State()
 
 # ---------- Вспомогательные функции ----------
@@ -71,7 +72,6 @@ async def broadcast_new_report(author_id: int, obj_id: int, data: dict):
     subcategory = data.get('subcategory')
     comment = data.get('comment')
     orientation_id = data.get('orientation_id')
-    orientation_type = data.get('orientation_type')
     lat = data.get('lat')
     lon = data.get('lon')
 
@@ -87,10 +87,7 @@ async def broadcast_new_report(author_id: int, obj_id: int, data: dict):
     else:
         text += "Категория: Красный берет\n"
     if orientation_id:
-        if orientation_type == 'to':
-            text += f"Направление: к ориентиру \"{orientation_id}\"\n"
-        else:
-            text += f"Направление: от ориентира \"{orientation_id}\"\n"
+        text += f"Ориентир: {orientation_id}\n"
     text += f"Координаты: {lat:.6f}, {lon:.6f}\n"
     text += f"Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
     text += "Посмотри карту: /map"
@@ -110,17 +107,16 @@ async def cmd_start(message: Message, state: FSMContext):
     await message.answer(
         "👋 Привет! Я <b>VP-Radar23</b> — бот для отметки и мониторинга объектов на карте.\n\n"
         "С моей помощью ты можешь:\n"
-        "– 📍 Добавлять объекты, выбрав точку прямо на карте или отправив свою геолокацию\n"
+        "– 📍 Добавлять объекты, указав местоположение (геолокацией или через ориентир)\n"
         "– 🚙 Указывать категорию: <b>Бобик</b> (патрульный или гражданский) или <b>Красный берет</b>\n"
-        "– 🧭 Задавать направление движения относительно известных ориентиров\n"
         "– 📷 Прикреплять фотографии к объектам\n"
         "– 🗺 Просматривать все репорты на интерактивной карте\n"
         "– 🔔 Получать уведомления о новых объектах от других пользователей\n\n"
         "Основные команды:\n"
-        "/add — добавить объект (выбор точки на карте)\n"
+        "/add — добавить объект\n"
         "/map — открыть карту со всеми объектами\n"
         "/start — показать это сообщение\n\n"
-        "Также ты можешь просто отправить свою геолокацию, и я начну диалог добавления объекта.",
+        "Ты можешь сразу отправить свою геолокацию, и я начну диалог добавления.",
         parse_mode="HTML"
     )
 
@@ -134,37 +130,61 @@ async def cmd_map(message: Message):
 @dp.message(Command("add"))
 async def cmd_add(message: Message, state: FSMContext):
     await state.clear()
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Выбрать точку на карте", web_app={"url": PUBLIC_URL + "/select"})]
-    ])
-    await message.answer("Выбери точку на карте:", reply_markup=keyboard)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📍 Геолокация", callback_data="loc_geo")
+    builder.button(text="🏛 Ориентир", callback_data="loc_orient")
+    builder.adjust(2)
+    await message.answer("Как указать местоположение?", reply_markup=builder.as_markup())
+    await state.set_state(Registration.waiting_for_location_method)
 
-# Обработка данных от WebApp (выбор координат)
-@dp.message(F.web_app_data)
-async def handle_web_app_data(message: Message, state: FSMContext):
-    data = message.web_app_data.data
-    logging.info(f"WebApp data received: {data}")
-    try:
-        coords = json.loads(data)
-        lat = coords['lat']
-        lon = coords['lon']
-        logging.info(f"Parsed coords: {lat}, {lon}")
-    except Exception as e:
-        logging.error(f"Error parsing web app data: {e}")
-        await message.answer("Ошибка получения координат.")
-        return
-    await state.update_data(lat=lat, lon=lon)
-    await ask_category(message, state)
+# ---------- Обработка выбора способа ----------
+@dp.callback_query(F.data == "loc_geo", Registration.waiting_for_location_method)
+async def choose_loc_geo(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.edit_text("Отправь свою геолокацию (кнопка 📎 -> Локация).")
+    await state.set_state(Registration.waiting_for_location)
 
-# Обработка геолокации (если пользователь отправил обычную)
+@dp.callback_query(F.data == "loc_orient", Registration.waiting_for_location_method)
+async def choose_loc_orient(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    for name in db.ORIENTEERS.keys():
+        builder.button(text=name, callback_data=f"orient_{name}")
+    builder.adjust(1)
+    await callback.message.answer("Выбери ориентир:", reply_markup=builder.as_markup())
+    await state.set_state(Registration.waiting_for_orientation_select)
+
+# ---------- Обработка геолокации (если прислана без команды) ----------
 @dp.message(F.location)
-async def handle_location(message: Message, state: FSMContext):
+async def handle_location_any(message: Message, state: FSMContext):
+    # Если пользователь прислал геолокацию вне состояний, тоже начинаем добавление
     lat = message.location.latitude
     lon = message.location.longitude
     await state.update_data(lat=lat, lon=lon)
     await ask_category(message, state)
 
-# ---------- Диалог ----------
+# ---------- Обработка геолокации в состоянии ожидания ----------
+@dp.message(F.location, Registration.waiting_for_location)
+async def handle_location_in_state(message: Message, state: FSMContext):
+    lat = message.location.latitude
+    lon = message.location.longitude
+    await state.update_data(lat=lat, lon=lon)
+    await ask_category(message, state)
+
+# ---------- Обработка выбора ориентира ----------
+@dp.callback_query(F.data.startswith("orient_"), Registration.waiting_for_orientation_select)
+async def choose_orientation(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    name = callback.data.split("_", 1)[1]
+    if name not in db.ORIENTEERS:
+        await callback.message.answer("Такого ориентира нет.")
+        return
+    lat, lon = db.ORIENTEERS[name]
+    await state.update_data(lat=lat, lon=lon, orientation_id=name)
+    await callback.message.answer(f"Выбран ориентир: {name}")
+    await ask_category(callback.message, state)
+
+# ---------- Диалог: категория ----------
 async def ask_category(message: Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.button(text="🚙 Бобик", callback_data="cat_bobik")
@@ -176,6 +196,8 @@ async def ask_category(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("cat_"))
 async def choose_category(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    if await state.get_state() != Registration.waiting_for_category.state:
+        return
     category = callback.data.split("_")[1]
     await state.update_data(category=category)
     await callback.message.edit_text(f"Категория: {get_category_label(category)}")
@@ -187,11 +209,13 @@ async def choose_category(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Выбери тип Бобика:", reply_markup=builder.as_markup())
         await state.set_state(Registration.waiting_for_subcategory)
     else:
-        await ask_orientation_type(callback.message, state)
+        await show_confirmation(callback.message, state)
 
 @dp.callback_query(F.data.startswith("subcat_"))
 async def choose_subcategory(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    if await state.get_state() != Registration.waiting_for_subcategory.state:
+        return
     subcat = callback.data.split("_")[1]  # patrol или civilian
     await state.update_data(subcategory=subcat)
     await callback.message.edit_text(f"Тип: {get_subcategory_label(subcat)}")
@@ -199,7 +223,7 @@ async def choose_subcategory(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Оставь комментарий с описанием (или отправь '-', чтобы пропустить):")
         await state.set_state(Registration.waiting_for_comment)
     else:
-        await ask_orientation_type(callback.message, state)
+        await show_confirmation(callback.message, state)
 
 @dp.message(Registration.waiting_for_comment)
 async def receive_comment(message: Message, state: FSMContext):
@@ -207,69 +231,78 @@ async def receive_comment(message: Message, state: FSMContext):
         await state.update_data(comment=None)
     else:
         await state.update_data(comment=message.text)
-    await ask_orientation_type(message, state)
+    await show_confirmation(message, state)
 
-async def ask_orientation_type(message: Message, state: FSMContext):
-    builder = InlineKeyboardBuilder()
-    builder.button(text="К ориентиру", callback_data="orient_to")
-    builder.button(text="От ориентира", callback_data="orient_from")
-    builder.button(text="Не указывать", callback_data="orient_none")
-    builder.adjust(2)
-    await message.answer("Укажи направление относительно ориентира:", reply_markup=builder.as_markup())
-    await state.set_state(Registration.waiting_for_orientation_type)
-
-@dp.callback_query(F.data.startswith("orient_"))
-async def choose_orientation_type(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    current_state = await state.get_state()
-    if current_state != Registration.waiting_for_orientation_type.state:
-        return  # игнорируем повторные нажатия
-    action = callback.data.split("_", 1)[1]  # to, from, none
-    if action == "none":
-        await state.update_data(orientation_id=None, orientation_type=None)
-        await save_object(callback.message, state)
-        return
-    await state.update_data(orientation_type=action)
-    builder = InlineKeyboardBuilder()
-    for name in db.ORIENTEERS.keys():
-        builder.button(text=name, callback_data=f"orient_name_{name}")
-    builder.adjust(1)
-    await callback.message.answer("Выбери ориентир:", reply_markup=builder.as_markup())
-    await state.set_state(Registration.waiting_for_orientation)
-
-@dp.callback_query(F.data.startswith("orient_name_"))
-async def choose_orientation(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    current_state = await state.get_state()
-    if current_state != Registration.waiting_for_orientation.state:
-        return  # игнорируем повторные нажатия
-    name = callback.data.split("_", 2)[2]  # после orient_name_
-    await state.update_data(orientation_id=name)
-    await save_object(callback.message, state)
-
-async def save_object(message: Message, state: FSMContext):
+# ---------- Подтверждение ----------
+async def show_confirmation(message: Message, state: FSMContext):
     data = await state.get_data()
+    lat = data.get('lat')
+    lon = data.get('lon')
+    category = data.get('category')
+    subcategory = data.get('subcategory')
+    comment = data.get('comment')
+    orientation_id = data.get('orientation_id')
+
+    text = "📋 <b>Проверь данные репорта:</b>\n\n"
+    if category == 'bobik':
+        text += f"Категория: Бобик\n"
+        if subcategory == 'patrol':
+            text += "Тип: Патрульный\n"
+        elif subcategory == 'civilian':
+            text += "Тип: Гражданский\n"
+        if comment:
+            text += f"Комментарий: {comment}\n"
+    else:
+        text += "Категория: Красный берет\n"
+    if orientation_id:
+        text += f"Ориентир: {orientation_id}\n"
+    text += f"Координаты: {lat:.6f}, {lon:.6f}"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить", callback_data="confirm_yes")
+    builder.button(text="❌ Отмена", callback_data="confirm_no")
+    builder.adjust(2)
+    await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    await state.set_state(Registration.waiting_for_confirmation)
+
+@dp.callback_query(F.data == "confirm_yes")
+async def confirm_yes(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    if await state.get_state() != Registration.waiting_for_confirmation.state:
+        return
+    data = await state.get_data()
+    await save_object(callback.message, state, data)
+
+@dp.callback_query(F.data == "confirm_no")
+async def confirm_no(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.edit_text("Добавление отменено.")
+    await state.clear()
+
+# ---------- Сохранение объекта ----------
+async def save_object(message: Message, state: FSMContext, data: dict):
     lat = data['lat']
     lon = data['lon']
     category = data['category']
     subcategory = data.get('subcategory')
     comment = data.get('comment')
     orientation_id = data.get('orientation_id')
-    orientation_type = data.get('orientation_type')
 
+    # orientation_type больше не используется, заполним None
     obj_id = db.add_object(
         user_id=message.from_user.id,
         category=category,
         subcategory=subcategory,
         comment=comment,
         orientation_id=orientation_id,
-        orientation_type=orientation_type,
+        orientation_type=None,
         lat=lat,
         lon=lon
     )
+    logging.info(f"Объект #{obj_id} создан")
     await message.answer(f"✅ Объект #{obj_id} создан!")
 
-    # Рассылка уведомления всем (кроме автора) в фоне
+    # Рассылка уведомления
     asyncio.create_task(broadcast_new_report(message.from_user.id, obj_id, data))
 
     builder = InlineKeyboardBuilder()
@@ -279,6 +312,7 @@ async def save_object(message: Message, state: FSMContext):
     await state.clear()
     await state.update_data(last_obj_id=obj_id)
 
+# ---------- Фото ----------
 @dp.callback_query(F.data.startswith("photo_"))
 async def photo_request(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -298,7 +332,6 @@ async def receive_photo(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file_info = await bot.get_file(photo.file_id)
     downloaded = await bot.download_file(file_info.file_path)
-    # Убедимся, что папка существует
     os.makedirs("/data/photos", exist_ok=True)
     filename = f"/data/photos/object_{obj_id}_{message.date.timestamp()}.jpg"
     with open(filename, "wb") as f:
