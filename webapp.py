@@ -50,7 +50,13 @@ MAP_HTML = """
                         popup += 'Красный берет<br>';
                     }
                     if (obj.orientation_id) {
-                        popup += 'Направление: ' + (obj.orientation_type === 'to' ? 'к' : 'от') + ' "' + obj.orientation_id + '"<br>';
+                        if (obj.orientation_type && obj.orientation_type === 'to') {
+                            popup += 'Направление: к "' + obj.orientation_id + '"<br>';
+                        } else if (obj.orientation_type && obj.orientation_type === 'from') {
+                            popup += 'Направление: от "' + obj.orientation_id + '"<br>';
+                        } else {
+                            popup += 'Ориентир: ' + obj.orientation_id + '<br>';
+                        }
                     }
                     popup += 'Время: ' + obj.timestamp;
                     if (obj.photos && obj.photos.length > 0) {
@@ -69,51 +75,9 @@ MAP_HTML = """
 </html>
 """
 
-# ---------- HTML для выбора точки ----------
-SELECT_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Выбор точки</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <style>
-        body { margin:0; }
-        #map { height: 100vh; width: 100%; }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    <script>
-        Telegram.WebApp.ready();
-        var map = L.map('map').setView([45.035470, 38.975313], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
-
-        map.on('click', function(e) {
-            var lat = e.latlng.lat;
-            var lon = e.latlng.lng;
-            var data = JSON.stringify({lat: lat, lon: lon});
-            Telegram.WebApp.sendData(data);
-            Telegram.WebApp.close();
-        });
-    </script>
-</body>
-</html>
-"""
-
 @app.route('/')
 def index():
     return render_template_string(MAP_HTML)
-
-@app.route('/select')
-def select():
-    return render_template_string(SELECT_HTML)
 
 @app.route('/photos/<path:filename>')
 def serve_photo(filename):
