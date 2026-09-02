@@ -143,11 +143,14 @@ async def cmd_add(message: Message, state: FSMContext):
 @dp.message(F.web_app_data)
 async def handle_web_app_data(message: Message, state: FSMContext):
     data = message.web_app_data.data
+    logging.info(f"WebApp data received: {data}")
     try:
         coords = json.loads(data)
         lat = coords['lat']
         lon = coords['lon']
-    except:
+        logging.info(f"Parsed coords: {lat}, {lon}")
+    except Exception as e:
+        logging.error(f"Error parsing web app data: {e}")
         await message.answer("Ошибка получения координат.")
         return
     await state.update_data(lat=lat, lon=lon)
@@ -218,6 +221,9 @@ async def ask_orientation_type(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("orient_"))
 async def choose_orientation_type(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    current_state = await state.get_state()
+    if current_state != Registration.waiting_for_orientation_type.state:
+        return  # игнорируем повторные нажатия
     action = callback.data.split("_", 1)[1]  # to, from, none
     if action == "none":
         await state.update_data(orientation_id=None, orientation_type=None)
@@ -234,6 +240,9 @@ async def choose_orientation_type(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data.startswith("orient_name_"))
 async def choose_orientation(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    current_state = await state.get_state()
+    if current_state != Registration.waiting_for_orientation.state:
+        return  # игнорируем повторные нажатия
     name = callback.data.split("_", 2)[2]  # после orient_name_
     await state.update_data(orientation_id=name)
     await save_object(callback.message, state)
