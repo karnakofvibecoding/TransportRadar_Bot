@@ -10,16 +10,20 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Update
+from aiogram.types import (
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, Update
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import db
-from webapp import app  # импортируем Flask-приложение
+from webapp import app
 
+# ---------- Токен ----------
 TOKEN = os.getenv("BOT_TOKEN")
-
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN не задан")
+
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://your-app.up.railway.app")
 
 bot = Bot(token=TOKEN)
@@ -50,14 +54,24 @@ dp.update.middleware(RegisterUserMiddleware())
 
 # ---------- FSM ----------
 class Registration(StatesGroup):
-    waiting_for_location_method = State()  # выбор способа: геолокация или ориентир
-    waiting_for_location = State()         # ожидание геолокации (если выбран этот способ)
-    waiting_for_orientation_select = State() # выбор конкретного ориентира
+    waiting_for_location_method = State()
+    waiting_for_location = State()
+    waiting_for_orientation_select = State()
     waiting_for_category = State()
     waiting_for_subcategory = State()
     waiting_for_comment = State()
     waiting_for_confirmation = State()
     waiting_for_photo = State()
+
+# ---------- Клавиатура с командами ----------
+def get_main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="/add"), KeyboardButton(text="/map")],
+            [KeyboardButton(text="/start")]
+        ],
+        resize_keyboard=True
+    )
 
 # ---------- Вспомогательные функции ----------
 def get_category_label(category: str) -> str:
@@ -117,7 +131,8 @@ async def cmd_start(message: Message, state: FSMContext):
         "/map — открыть карту со всеми объектами\n"
         "/start — показать это сообщение\n\n"
         "Ты можешь сразу отправить свою геолокацию, и я начну диалог добавления.",
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard()
     )
 
 @dp.message(Command("map"))
@@ -157,7 +172,6 @@ async def choose_loc_orient(callback: CallbackQuery, state: FSMContext):
 # ---------- Обработка геолокации (если прислана без команды) ----------
 @dp.message(F.location)
 async def handle_location_any(message: Message, state: FSMContext):
-    # Если пользователь прислал геолокацию вне состояний, тоже начинаем добавление
     lat = message.location.latitude
     lon = message.location.longitude
     await state.update_data(lat=lat, lon=lon)
@@ -288,7 +302,6 @@ async def save_object(message: Message, state: FSMContext, data: dict):
     comment = data.get('comment')
     orientation_id = data.get('orientation_id')
 
-    # orientation_type больше не используется, заполним None
     obj_id = db.add_object(
         user_id=message.from_user.id,
         category=category,
