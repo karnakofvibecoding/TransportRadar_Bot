@@ -23,7 +23,7 @@ MAP_HTML = """
 <body>
     <div id="map"></div>
     <script>
-        var map = L.map('map').setView([55.751244, 37.618423], 11);
+        var map = L.map('map').setView([45.035470, 38.975313], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
@@ -78,7 +78,7 @@ SELECT_HTML = """
 <body>
     <div id="map"></div>
     <script>
-        var map = L.map('map').setView([55.751244, 37.618423], 12);
+        var map = L.map('map').setView([45.035470, 38.975313], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
