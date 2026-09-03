@@ -120,6 +120,9 @@ def get_last_position(object_id):
     return row
 
 def get_all_objects_with_last_position(category=None, subcategory=None):
+    """
+    Возвращает объекты с последней позицией не старше 90 минут.
+    """
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
     query = """
@@ -133,6 +136,7 @@ def get_all_objects_with_last_position(category=None, subcategory=None):
             WHERE p2.object_id = o.id
             ORDER BY p2.timestamp DESC, p2.id DESC LIMIT 1
         )
+        AND p.timestamp > datetime('now', '-90 minutes')
     """
     params = []
     if category:
