@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 from datetime import datetime
-from typing import Optional
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.filters import Command
@@ -25,6 +25,7 @@ if not TOKEN:
     raise RuntimeError("BOT_TOKEN не задан")
 
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://your-app.up.railway.app")
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -89,6 +90,8 @@ async def broadcast_new_report(author_id: int, obj_id: int, data: dict):
     lat = data.get('lat')
     lon = data.get('lon')
 
+    moscow_time = datetime.now(MOSCOW_TZ).strftime('%Y-%m-%d %H:%M:%S')
+
     text = f"🚨 Новый репорт #{obj_id}!\n"
     if category == 'bobik':
         text += "Категория: Бобик\n"
@@ -103,7 +106,7 @@ async def broadcast_new_report(author_id: int, obj_id: int, data: dict):
     if orientation_id:
         text += f"Ориентир: {orientation_id}\n"
     text += f"Координаты: {lat:.6f}, {lon:.6f}\n"
-    text += f"Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    text += f"Время: {moscow_time}\n"
     text += "Посмотри карту: /map"
 
     users = db.get_all_users()
