@@ -1,11 +1,13 @@
 import os
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, render_template_string, request, send_from_directory
 import db
 
 app = Flask(__name__)
 
-# Путь к фотографиям (volume). Если volume не подключён, можно заменить на "photos"
 PHOTOS_DIR = "/data/photos"
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 # ---------- HTML для просмотра карты (Яндекс.Карты) ----------
 MAP_HTML = """
@@ -32,7 +34,6 @@ MAP_HTML = """
                 controls: ['zoomControl', 'searchControl', 'typeSelector', 'fullscreenControl']
             });
 
-            // Получаем данные объектов
             fetch('/api/objects')
                 .then(response => response.json())
                 .then(data => {
@@ -107,6 +108,15 @@ def api_objects():
     objects = []
     for row in rows:
         obj_id, cat, subcat, comment, orient_id, orient_type, lat, lon, timestamp = row
+        # Конвертируем время в московское
+        try:
+            dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            dt_utc = dt.replace(tzinfo=timezone.utc)
+            dt_msk = dt_utc.astimezone(MOSCOW_TZ)
+            timestamp_msk = dt_msk.strftime('%Y-%m-%d %H:%M:%S')
+        except:
+            timestamp_msk = timestamp  # если не удалось, оставляем как есть
+
         photo_files = db.get_photos_for_object(obj_id)
         photo_urls = [f"/photos/{os.path.basename(fp)}" for fp, _ in photo_files]
         objects.append({
@@ -118,7 +128,7 @@ def api_objects():
             'orientation_type': orient_type,
             'lat': lat,
             'lon': lon,
-            'timestamp': timestamp,
+            'timestamp': timestamp_msk,
             'photos': photo_urls
         })
     return jsonify({'objects': objects})
